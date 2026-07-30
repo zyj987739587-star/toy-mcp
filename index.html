@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Toy Control</title>
+</head>
+<body style="background:#1a1a1a;color:#f5c6a0;text-align:center;padding-top:10vh;font-family:sans-serif;">
+<h1 id="status">点击「扫描」连接设备</h1>
+<button id="scanBtn" style="padding:16px 32px;font-size:18px;background:#f5c6a0;color:#1a1a1a;border:none;border-radius:8px;">
+  🔍 扫描新设备
+</button>
+<div id="devList"></div>
+
+<script>
+// 把下面的地址改成你 Railway 部署后的实际域名
+const STATE_URL = window.location.origin + '/state';
+window.devices = [];
+let lastUpdatedAt = 0;
+
+/* Map 0-100 strength to BLE intensity (0-255) */
+function mapIntensity(v) {
+    if (v <= 0) return 0;
+    if (v <= 20) return 50;
+    if (v <= 40) return 100;
+    if (v <= 60) return 160;
+    if (v <= 80) return 210;
+    return 255;
+}
+
+async function sendAll(intensity) {
+    const i = mapIntensity(intensity);
+    const data = new Uint8Array([0x55, 0x04, 0x00, 0x00, 0x01, i, 0xAA]);
+    for (const d of window.devices) {
+        try { await d.writeChar.writeValue(data); } catch(e) {}
+    }
+}
+
+async function stopAll() {
+    const data = new Uint8Array([0x55, 0x04, 0x00, 0x00, 0x00, 0x00, 0xAA]);
+    for (const d of window.devices) {
+        try { await d.writeChar.writeValue(data); } catch(e) {}
+    }
+}
+
+async function connectOne() {
+    document.getElementById('status').textContent = '扫描中...';
+    const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb']
+    });
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
+    const chars = await service.getCharacteristics();
+    let wc = null;
+    for (const c of chars) {
+        if (c.properties.writeWithoutResponse || c.properties.write) {
+            wc = c; break;
+        }
+    }
+    const entry = { name: device.name, writeChar: wc, device };
+    window.devices.push(entry);
+    device.addEventListener('gattserverdisconnected', () => {
+        window.devices = window.devices.filter(d => d.device !== device);
+        updateUI();
+    });
+    updateUI();
+}
+
+function updateUI() {
+    const n = window.devices.length;
+    document.getElementById('status').textContent =
+        n > 0 ? '已连接 ' + n + ' 个设备 (' + window.devices.map(d=>d.name).join(', ') + ')' : '全部断开 - 点击重连';
+    document.getElementById('status').style.color = n > 0 ? '#7ec87e' : '#f5c6a0';
+}
+
+document.getElementById('scanBtn').addEventListener('click', connectOne);
+
+let lastCmd = null;
+setInterval(async () => {
+    if (window.devices.length === 0) return;
+    try {
+        const res = await fetch(STATE_URL);
+        const state = await res.json();
+        if (state.updated_at > lastUpdatedAt) {
+            lastUpdatedAt = state.updated_at;
+            if (state.cmd === 'stop') { lastCmd = null; await stopAll(); }
+            else if (state.cmd === 'set') {
+                lastCmd = state.intensity || 0;
+                await sendAll(lastCmd);
+            }
+        }
+    } catch(e) {}
+}, 1000);
+
+/* Periodic keep-alive resend */
+setInterval(async () => {
+    if (lastCmd !== null && window.devices.length > 0) {
+        await sendAll(lastCmd);
+    }
+}, 1400);
+</script>
+</body>
+</html>
