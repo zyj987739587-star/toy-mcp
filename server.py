@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ToyMCP for Railway: Combined MCP server + Web Bluetooth page."""
+"""ToyMCP for Railway: Combined MCP server + Web Bluetooth page + HTTP Fallback."""
 import json, os, time
 from mcp.server.mcpserver import MCPServer
 from starlette.routing import Route
@@ -83,9 +83,26 @@ async def homepage(request):
 async def state_endpoint(request):
     return JSONResponse(_read_state())
 
+# ─── HTTP Fallback Endpoints ───
+async def http_set_endpoint(request):
+    intensity = request.query_params.get("intensity", 0)
+    try:
+        val = float(intensity)
+    except:
+        val = 0.0
+    val = max(0.0, min(100.0, val))
+    _write_state("set", mode=1, intensity=val)
+    return JSONResponse({"status": "ok", "intensity": val})
+
+async def http_stop_endpoint(request):
+    _write_state("stop")
+    return JSONResponse({"status": "stopped"})
+
 # ─── Combined App ───
 app = mcp.streamable_http_app()
 app.router.routes.insert(0, Route("/state", state_endpoint, methods=["GET"]))
+app.router.routes.insert(0, Route("/set", http_set_endpoint, methods=["GET"]))
+app.router.routes.insert(0, Route("/stop", http_stop_endpoint, methods=["GET"]))
 app.router.routes.insert(0, Route("/", homepage, methods=["GET"]))
 
 if __name__ == "__main__":
