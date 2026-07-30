@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ToyMCP for Railway: Combined MCP server + Web Bluetooth page."""
 import json, os, time
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from starlette.routing import Route
 from starlette.responses import HTMLResponse, JSONResponse
 
@@ -27,35 +27,45 @@ def _read_state():
     except:
         return {"cmd": "stop", "mode": 0, "intensity": 0, "updated_at": 0}
 
-# ─── FastMCP Server ───
-mcp = FastMCP("toy-mcp", streamable_http_path="/mcp")
+# ─── MCPServer ───
+mcp = MCPServer(name="toy-mcp")
 
-@mcp.tool()
-def toy_scan() -> str:
-    """List available toys."""
+@mcp.tool(
+    name="toy_scan",
+    description="List available toys."
+)
+async def toy_scan() -> str:
     return json.dumps({"toys": [{"name": "SL278K", "index": 0}]})
 
-@mcp.tool()
-def toy_connect(index: int = 0) -> str:
-    """Connect to a toy by index."""
+@mcp.tool(
+    name="toy_connect",
+    description="Connect to a toy by index."
+)
+async def toy_connect(index: int = 0) -> str:
     return json.dumps({"status": "connected", "device": "SL278K", "index": index})
 
-@mcp.tool()
-def toy_set_strength(value: float) -> str:
-    """Set vibration strength 0-100. 0=stop, 20=gentle, 50=moderate, 80=very strong, 100=maximum."""
+@mcp.tool(
+    name="toy_set_strength",
+    description="Set vibration strength 0-100. 0=stop, 20=gentle, 50=moderate, 80=very strong, 100=maximum."
+)
+async def toy_set_strength(value: float) -> str:
     val = max(0, min(100, value))
     _write_state("set", mode=1, intensity=val)
     return json.dumps({"status": "ok", "strength": val})
 
-@mcp.tool()
-def toy_stop() -> str:
-    """Stop all vibration immediately."""
+@mcp.tool(
+    name="toy_stop",
+    description="Stop all vibration immediately."
+)
+async def toy_stop() -> str:
     _write_state("stop")
     return json.dumps({"status": "stopped"})
 
-@mcp.tool()
-def toy_disconnect() -> str:
-    """Disconnect from toy."""
+@mcp.tool(
+    name="toy_disconnect",
+    description="Disconnect from toy."
+)
+async def toy_disconnect() -> str:
     _write_state("stop")
     return json.dumps({"status": "disconnected"})
 
@@ -74,7 +84,7 @@ async def state_endpoint(request):
     return JSONResponse(_read_state())
 
 # ─── Combined App ───
-app = mcp.streamable_http_app()
+app = mcp.create_starlette_app(streamable_http_path="/mcp")
 app.router.routes.insert(0, Route("/state", state_endpoint, methods=["GET"]))
 app.router.routes.insert(0, Route("/", homepage, methods=["GET"]))
 
