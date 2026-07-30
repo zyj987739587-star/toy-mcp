@@ -84,7 +84,7 @@ async def state_endpoint(request):
     return JSONResponse(_read_state())
 
 # ─── Combined App ───
-app = mcp.create_starlette_app(streamable_http_path="/mcp")
+app = mcp.streamable_http_app()
 app.router.routes.insert(0, Route("/state", state_endpoint, methods=["GET"]))
 app.router.routes.insert(0, Route("/", homepage, methods=["GET"]))
 
