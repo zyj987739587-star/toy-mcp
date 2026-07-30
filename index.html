@@ -3,20 +3,56 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Toy Control</title>
+<title>Toy Control - Dual Channel</title>
 </head>
-<body style="background:#1a1a1a;color:#f5c6a0;text-align:center;padding-top:10vh;font-family:sans-serif;">
-<h1 id="status">点击「扫描」连接设备</h1>
-<button id="scanBtn" style="padding:16px 32px;font-size:18px;background:#f5c6a0;color:#1a1a1a;border:none;border-radius:8px;">
-  🔍 扫描新设备
-</button>
-<div id="devList"></div>
+<body style="background:#1a1a1a;color:#f5c6a0;text-align:center;padding-top:8vh;font-family:sans-serif;">
+<h2 id="status">点击「扫描」连接设备</h2>
+<p style="color:#888;font-size:0.85em;">可连接多个设备，指令会同时发送到所有已连接设备</p>
+
+<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0;">
+  <button id="scanBtn" style="padding:14px 28px;font-size:16px;background:#f5c6a0;color:#1a1a1a;border:none;border-radius:8px;">
+    🔍 扫描新设备
+  </button>
+  <button id="stopAllBtn" style="padding:14px 28px;font-size:16px;background:#e94560;color:#fff;border:none;border-radius:8px;">
+    ⏹ 全部停止
+  </button>
+</div>
+
+<div id="devList" style="margin:16px 0;"></div>
+
+<div style="display:flex;gap:24px;justify-content:center;flex-wrap:wrap;margin:24px auto;max-width:600px;">
+  <div style="background:#16213e;padding:20px;border-radius:10px;min-width:260px;">
+    <h3 style="color:#6ec6f0;margin-bottom:12px;">📳 震动通道</h3>
+    <p id="vibeStatus" style="color:#888;">等待指令...</p>
+    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px;">
+      <button class="vibeBtn" data-v="20" style="padding:10px 16px;background:#0f3460;color:#e0e0e0;border:none;border-radius:6px;">轻柔 20</button>
+      <button class="vibeBtn" data-v="50" style="padding:10px 16px;background:#0f3460;color:#e0e0e0;border:none;border-radius:6px;">中等 50</button>
+      <button class="vibeBtn" data-v="80" style="padding:10px 16px;background:#0f3460;color:#e0e0e0;border:none;border-radius:6px;">强烈 80</button>
+      <button class="vibeBtn" data-v="100" style="padding:10px 16px;background:#e94560;color:#fff;border:none;border-radius:6px;">最大 100</button>
+      <button id="vibeStopBtn" style="padding:10px 16px;background:#333;color:#aaa;border:none;border-radius:6px;">停止</button>
+    </div>
+  </div>
+
+  <div style="background:#16213e;padding:20px;border-radius:10px;min-width:260px;">
+    <h3 style="color:#f0a0e0;margin-bottom:12px;">🌸 吮吸通道</h3>
+    <p id="suctionStatus" style="color:#888;">等待指令...</p>
+    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px;">
+      <button class="suctionBtn" data-v="20" style="padding:10px 16px;background:#4a2a4a;color:#e0e0e0;border:none;border-radius:6px;">轻柔 20</button>
+      <button class="suctionBtn" data-v="50" style="padding:10px 16px;background:#4a2a4a;color:#e0e0e0;border:none;border-radius:6px;">中等 50</button>
+      <button class="suctionBtn" data-v="80" style="padding:10px 16px;background:#4a2a4a;color:#e0e0e0;border:none;border-radius:6px;">强烈 80</button>
+      <button class="suctionBtn" data-v="100" style="padding:10px 16px;background:#e94560;color:#fff;border:none;border-radius:6px;">最大 100</button>
+      <button id="suctionStopBtn" style="padding:10px 16px;background:#333;color:#aaa;border:none;border-radius:6px;">停止</button>
+    </div>
+  </div>
+</div>
 
 <script>
-// 把下面的地址改成你 Railway 部署后的实际域名
 const STATE_URL = window.location.origin + '/state';
 window.devices = [];
-let lastUpdatedAt = 0;
+let lastVibeUpdate = 0;
+let lastSuctionUpdate = 0;
+let currentVibe = null;
+let currentSuction = null;
 
 /* Map 0-100 strength to BLE intensity (0-255) */
 function mapIntensity(v) {
@@ -28,7 +64,8 @@ function mapIntensity(v) {
     return 255;
 }
 
-async function sendAll(intensity) {
+/* Send vibration command to all connected devices */
+async function sendVibration(intensity) {
     const i = mapIntensity(intensity);
     const data = new Uint8Array([0x55, 0x04, 0x00, 0x00, 0x01, i, 0xAA]);
     for (const d of window.devices) {
@@ -36,11 +73,36 @@ async function sendAll(intensity) {
     }
 }
 
-async function stopAll() {
-    const data = new Uint8Array([0x55, 0x04, 0x00, 0x00, 0x00, 0x00, 0xAA]);
+/* Send suction command to all connected devices */
+async function sendSuction(intensity) {
+    const i = mapIntensity(intensity);
+    /* Suction uses mode 0x02 instead of 0x01 */
+    const data = new Uint8Array([0x55, 0x04, 0x00, 0x00, 0x02, i, 0xAA]);
     for (const d of window.devices) {
         try { await d.writeChar.writeValue(data); } catch(e) {}
     }
+}
+
+/* Stop vibration */
+async function stopVibration() {
+    const data = new Uint8Array([0x55, 0x04, 0x00, 0x00, 0x01, 0x00, 0xAA]);
+    for (const d of window.devices) {
+        try { await d.writeChar.writeValue(data); } catch(e) {}
+    }
+}
+
+/* Stop suction */
+async function stopSuction() {
+    const data = new Uint8Array([0x55, 0x04, 0x00, 0x00, 0x02, 0x00, 0xAA]);
+    for (const d of window.devices) {
+        try { await d.writeChar.writeValue(data); } catch(e) {}
+    }
+}
+
+/* Stop everything */
+async function stopAllDevices() {
+    await stopVibration();
+    await stopSuction();
 }
 
 async function connectOne() {
@@ -69,25 +131,85 @@ async function connectOne() {
 
 function updateUI() {
     const n = window.devices.length;
+    const names = window.devices.map(d => d.name).join(', ');
     document.getElementById('status').textContent =
-        n > 0 ? '已连接 ' + n + ' 个设备 (' + window.devices.map(d=>d.name).join(', ') + ')' : '全部断开 - 点击重连';
+        n > 0 ? '✅ 已连接 ' + n + ' 个设备 (' + names + ')' : '❌ 全部断开 - 点击重连';
     document.getElementById('status').style.color = n > 0 ? '#7ec87e' : '#f5c6a0';
 }
 
 document.getElementById('scanBtn').addEventListener('click', connectOne);
+document.getElementById('stopAllBtn').addEventListener('click', stopAllDevices);
 
-let lastCmd = null;
+/* Vibration buttons */
+document.querySelectorAll('.vibeBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const v = parseInt(btn.dataset.v);
+        currentVibe = v;
+        sendVibration(v);
+        document.getElementById('vibeStatus').textContent = '震动: ' + v;
+        document.getElementById('vibeStatus').style.color = '#7ec87e';
+    });
+});
+document.getElementById('vibeStopBtn').addEventListener('click', () => {
+    currentVibe = null;
+    stopVibration();
+    document.getElementById('vibeStatus').textContent = '震动: 已停止';
+    document.getElementById('vibeStatus').style.color = '#888';
+});
+
+/* Suction buttons */
+document.querySelectorAll('.suctionBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const v = parseInt(btn.dataset.v);
+        currentSuction = v;
+        sendSuction(v);
+        document.getElementById('suctionStatus').textContent = '吮吸: ' + v;
+        document.getElementById('suctionStatus').style.color = '#7ec87e';
+    });
+});
+document.getElementById('suctionStopBtn').addEventListener('click', () => {
+    currentSuction = null;
+    stopSuction();
+    document.getElementById('suctionStatus').textContent = '吮吸: 已停止';
+    document.getElementById('suctionStatus').style.color = '#888';
+});
+
+/* Poll server for commands */
 setInterval(async () => {
     if (window.devices.length === 0) return;
     try {
         const res = await fetch(STATE_URL);
         const state = await res.json();
-        if (state.updated_at > lastUpdatedAt) {
-            lastUpdatedAt = state.updated_at;
-            if (state.cmd === 'stop') { lastCmd = null; await stopAll(); }
-            else if (state.cmd === 'set') {
-                lastCmd = state.intensity || 0;
-                await sendAll(lastCmd);
+
+        /* Check vibration commands */
+        if (state.vibration && state.vibration.updated_at > lastVibeUpdate) {
+            lastVibeUpdate = state.vibration.updated_at;
+            if (state.vibration.cmd === 'stop') {
+                currentVibe = null;
+                await stopVibration();
+                document.getElementById('vibeStatus').textContent = '震动: 已停止';
+                document.getElementById('vibeStatus').style.color = '#888';
+            } else if (state.vibration.cmd === 'set') {
+                currentVibe = state.vibration.intensity || 0;
+                await sendVibration(currentVibe);
+                document.getElementById('vibeStatus').textContent = '震动: ' + currentVibe;
+                document.getElementById('vibeStatus').style.color = '#7ec87e';
+            }
+        }
+
+        /* Check suction commands */
+        if (state.suction && state.suction.updated_at > lastSuctionUpdate) {
+            lastSuctionUpdate = state.suction.updated_at;
+            if (state.suction.cmd === 'stop') {
+                currentSuction = null;
+                await stopSuction();
+                document.getElementById('suctionStatus').textContent = '吮吸: 已停止';
+                document.getElementById('suctionStatus').style.color = '#888';
+            } else if (state.suction.cmd === 'set') {
+                currentSuction = state.suction.intensity || 0;
+                await sendSuction(currentSuction);
+                document.getElementById('suctionStatus').textContent = '吮吸: ' + currentSuction;
+                document.getElementById('suctionStatus').style.color = '#7ec87e';
             }
         }
     } catch(e) {}
@@ -95,8 +217,11 @@ setInterval(async () => {
 
 /* Periodic keep-alive resend */
 setInterval(async () => {
-    if (lastCmd !== null && window.devices.length > 0) {
-        await sendAll(lastCmd);
+    if (currentVibe !== null && window.devices.length > 0) {
+        await sendVibration(currentVibe);
+    }
+    if (currentSuction !== null && window.devices.length > 0) {
+        await sendSuction(currentSuction);
     }
 }, 1400);
 </script>
